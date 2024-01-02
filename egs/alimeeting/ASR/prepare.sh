@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 
+# fix segmentation fault reported in https://github.com/k2-fsa/icefall/issues/674
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
 set -eou pipefail
 
 stage=-1
 stop_stage=100
+perturb_speed=true
 
 # We assume dl_dir (download dir) contains the following
 # directories and files. If not, they will be downloaded
@@ -65,7 +69,7 @@ if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
   log "Stage 2: Process alimeeting"
   if [ ! -f data/fbank/alimeeting/.fbank.done ]; then
     mkdir -p data/fbank/alimeeting
-    lhotse prepare ali-meeting $dl_dir/alimeeting data/manifests/alimeeting
+    ./local/compute_fbank_alimeeting.py --perturb-speed ${perturb_speed}
   fi
 fi
 
@@ -94,7 +98,7 @@ if [ $stage -le 5 ] && [ $stop_stage -ge 5 ]; then
   log "Stage 5: Compute fbank for alimeeting"
   if [ ! -f data/fbank/.alimeeting.done ]; then
     mkdir -p data/fbank
-    ./local/compute_fbank_alimeeting.py
+    ./local/compute_fbank_alimeeting.py --perturb-speed True
     touch data/fbank/.alimeeting.done
   fi
 fi
@@ -107,7 +111,7 @@ if [ $stage -le 6 ] && [ $stop_stage -ge 6 ]; then
   # Prepare text.
   # Note: in Linux, you can install jq with the  following command:
   # wget -O jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
-  gunzip -c data/manifests/alimeeting/supervisions_train.jsonl.gz \
+  gunzip -c data/manifests/alimeeting/alimeeting_supervisions_train.jsonl.gz \
     | jq ".text" | sed 's/"//g' \
     | ./local/text2token.py -t "char" > $lang_char_dir/text
 

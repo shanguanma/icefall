@@ -2,7 +2,7 @@ Recipes
 =======
 
 This page contains various recipes in ``icefall``.
-Currently, only speech recognition recipes are provided.
+Currently, we provide recipes for speech recognition, language model, and speech synthesis.
 
 We may add recipes for other tasks as well in the future.
 
@@ -13,7 +13,7 @@ We may add recipes for other tasks as well in the future.
    :maxdepth: 2
    :caption: Table of Contents
 
-   aishell/index
-   librispeech/index
-   timit/index
-   yesno/index
+   Non-streaming-ASR/index
+   Streaming-ASR/index
+   RNN-LM/index
+   TTS/index

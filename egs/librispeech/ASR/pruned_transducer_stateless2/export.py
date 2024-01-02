@@ -22,7 +22,7 @@
 Usage:
 ./pruned_transducer_stateless2/export.py \
   --exp-dir ./pruned_transducer_stateless2/exp \
-  --bpe-model data/lang_bpe_500/bpe.model \
+  --tokens ./data/lang_bpe_500/tokens.txt \
   --epoch 20 \
   --avg 10
 
@@ -47,16 +47,13 @@ import argparse
 import logging
 from pathlib import Path
 
-import sentencepiece as spm
+import k2
 import torch
+from scaling_converter import convert_scaled_to_non_scaled
 from train import add_model_arguments, get_params, get_transducer_model
 
-from icefall.checkpoint import (
-    average_checkpoints,
-    find_checkpoints,
-    load_checkpoint,
-)
-from icefall.utils import str2bool
+from icefall.checkpoint import average_checkpoints, find_checkpoints, load_checkpoint
+from icefall.utils import num_tokens, str2bool
 
 
 def get_parser():
@@ -102,10 +99,10 @@ def get_parser():
     )
 
     parser.add_argument(
-        "--bpe-model",
+        "--tokens",
         type=str,
-        default="data/lang_bpe_500/bpe.model",
-        help="Path to the BPE model",
+        default="data/lang_bpe_500/tokens.txt",
+        help="Path to the tokens.txt.",
     )
 
     parser.add_argument(
@@ -120,8 +117,7 @@ def get_parser():
         "--context-size",
         type=int,
         default=2,
-        help="The context size in the decoder. 1 means bigram; "
-        "2 means tri-gram",
+        help="The context size in the decoder. 1 means bigram; 2 means tri-gram",
     )
 
     parser.add_argument(
@@ -150,12 +146,14 @@ def main():
 
     logging.info(f"device: {device}")
 
-    sp = spm.SentencePieceProcessor()
-    sp.load(params.bpe_model)
+    # Load tokens.txt here
+    token_table = k2.SymbolTable.from_file(params.tokens)
 
+    # Load id of the <blk> token and the vocab size
     # <blk> is defined in local/train_bpe_model.py
-    params.blank_id = sp.piece_to_id("<blk>")
-    params.vocab_size = sp.get_piece_size()
+    params.blank_id = token_table["<blk>"]
+    params.unk_id = token_table["<unk>"]
+    params.vocab_size = num_tokens(token_table) + 1  # +1 for <blk>
 
     if params.streaming_model:
         assert params.causal_convolution
@@ -173,8 +171,7 @@ def main():
         ]
         if len(filenames) == 0:
             raise ValueError(
-                f"No checkpoints found for"
-                f" --iter {params.iter}, --avg {params.avg}"
+                f"No checkpoints found for --iter {params.iter}, --avg {params.avg}"
             )
         elif len(filenames) < params.avg:
             raise ValueError(
@@ -202,6 +199,7 @@ def main():
     model.eval()
 
     if params.jit:
+        convert_scaled_to_non_scaled(model, inplace=True)
         # We won't use the forward() method of the model in C++, so just ignore
         # it here.
         # Otherwise, one of its arguments is a ragged tensor and is not
@@ -222,9 +220,7 @@ def main():
 
 
 if __name__ == "__main__":
-    formatter = (
-        "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
-    )
+    formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
 
     logging.basicConfig(format=formatter, level=logging.INFO)
     main()

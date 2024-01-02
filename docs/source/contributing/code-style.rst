@@ -11,9 +11,9 @@ We use the following tools to make the code style to be as consistent as possibl
 
 The following versions of the above tools are used:
 
-  - ``black == 12.6b0``
-  - ``flake8 == 3.9.2``
-  - ``isort == 5.9.2``
+  - ``black == 22.3.0``
+  - ``flake8 == 5.0.4``
+  - ``isort == 5.10.1``
 
 After running the following commands:
 
@@ -38,7 +38,7 @@ Please fix any issues reported by the check tools.
 .. HINT::
 
   Some of the check tools, i.e., ``black`` and ``isort`` will modify
-  the files to be commited **in-place**. So please run ``git status``
+  the files to be committed **in-place**. So please run ``git status``
   after failure to see which file has been modified by the tools
   before you make any further changes.
 
@@ -56,8 +56,15 @@ can do the following:
 
   .. code-block:: bash
 
+    $ pre-commit install
+    $ pre-commit run
+
+Or without installing the pre-commit hooks:
+
+  .. code-block:: bash
+
     $ cd icefall
-    $ pip install black==21.6b0 flake8==3.9.2 isort==5.9.2
+    $ pip install black==22.3.0 flake8==5.0.4 isort==5.10.1
     $ black --check your_changed_file.py
     $ black your_changed_file.py  # modify it in-place
     $

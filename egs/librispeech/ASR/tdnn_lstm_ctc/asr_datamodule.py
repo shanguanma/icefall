@@ -31,7 +31,7 @@ from lhotse.dataset import (  # noqa F401 for PrecomputedFeatures
     DynamicBucketingSampler,
     K2SpeechRecognitionDataset,
     PrecomputedFeatures,
-    SingleCutSampler,
+    SimpleCutSampler,
     SpecAugment,
 )
 from lhotse.dataset.input_strategies import (  # noqa F401 For AudioSamples
@@ -86,9 +86,16 @@ class LibriSpeechAsrDataModule:
             "--full-libri",
             type=str2bool,
             default=True,
-            help="When enabled, use 960h LibriSpeech. "
-            "Otherwise, use 100h subset.",
+            help="""Used only when --mini-libri is False.When enabled,
+            use 960h LibriSpeech. Otherwise, use 100h subset.""",
         )
+        group.add_argument(
+            "--mini-libri",
+            type=str2bool,
+            default=False,
+            help="True for mini librispeech",
+        )
+
         group.add_argument(
             "--manifest-dir",
             type=Path,
@@ -224,13 +231,9 @@ class LibriSpeechAsrDataModule:
         if self.args.enable_musan:
             logging.info("Enable MUSAN")
             logging.info("About to get Musan cuts")
-            cuts_musan = load_manifest(
-                self.args.manifest_dir / "musan_cuts.jsonl.gz"
-            )
+            cuts_musan = load_manifest(self.args.manifest_dir / "musan_cuts.jsonl.gz")
             transforms.append(
-                CutMix(
-                    cuts=cuts_musan, prob=0.5, snr=(10, 20), preserve_id=True
-                )
+                CutMix(cuts=cuts_musan, p=0.5, snr=(10, 20), preserve_id=True)
             )
         else:
             logging.info("Disable MUSAN")
@@ -252,9 +255,7 @@ class LibriSpeechAsrDataModule:
         input_transforms = []
         if self.args.enable_spec_aug:
             logging.info("Enable SpecAugment")
-            logging.info(
-                f"Time warp factor: {self.args.spec_aug_time_warp_factor}"
-            )
+            logging.info(f"Time warp factor: {self.args.spec_aug_time_warp_factor}")
             # Set the value of num_frame_masks according to Lhotse's version.
             # In different Lhotse's versions, the default of num_frame_masks is
             # different.
@@ -298,9 +299,7 @@ class LibriSpeechAsrDataModule:
             # Drop feats to be on the safe side.
             train = K2SpeechRecognitionDataset(
                 cut_transforms=transforms,
-                input_strategy=OnTheFlyFeatures(
-                    Fbank(FbankConfig(num_mel_bins=80))
-                ),
+                input_strategy=OnTheFlyFeatures(Fbank(FbankConfig(num_mel_bins=80))),
                 input_transforms=input_transforms,
                 return_cuts=self.args.return_cuts,
             )
@@ -315,8 +314,8 @@ class LibriSpeechAsrDataModule:
                 drop_last=self.args.drop_last,
             )
         else:
-            logging.info("Using SingleCutSampler.")
-            train_sampler = SingleCutSampler(
+            logging.info("Using SimpleCutSampler.")
+            train_sampler = SimpleCutSampler(
                 cuts_train,
                 max_duration=self.args.max_duration,
                 shuffle=self.args.shuffle,
@@ -356,9 +355,7 @@ class LibriSpeechAsrDataModule:
         if self.args.on_the_fly_feats:
             validate = K2SpeechRecognitionDataset(
                 cut_transforms=transforms,
-                input_strategy=OnTheFlyFeatures(
-                    Fbank(FbankConfig(num_mel_bins=80))
-                ),
+                input_strategy=OnTheFlyFeatures(Fbank(FbankConfig(num_mel_bins=80))),
                 return_cuts=self.args.return_cuts,
             )
         else:
@@ -405,6 +402,13 @@ class LibriSpeechAsrDataModule:
         return test_dl
 
     @lru_cache()
+    def train_clean_5_cuts(self) -> CutSet:
+        logging.info("mini_librispeech: About to get train-clean-5 cuts")
+        return load_manifest_lazy(
+            self.args.manifest_dir / "librispeech_cuts_train-clean-5.jsonl.gz"
+        )
+
+    @lru_cache()
     def train_clean_100_cuts(self) -> CutSet:
         logging.info("About to get train-clean-100 cuts")
         return load_manifest_lazy(
@@ -423,6 +427,23 @@ class LibriSpeechAsrDataModule:
         logging.info("About to get train-other-500 cuts")
         return load_manifest_lazy(
             self.args.manifest_dir / "librispeech_cuts_train-other-500.jsonl.gz"
+        )
+
+    @lru_cache()
+    def train_all_shuf_cuts(self) -> CutSet:
+        logging.info(
+            "About to get the shuffled train-clean-100, \
+            train-clean-360 and train-other-500 cuts"
+        )
+        return load_manifest_lazy(
+            self.args.manifest_dir / "librispeech_cuts_train-all-shuf.jsonl.gz"
+        )
+
+    @lru_cache()
+    def dev_clean_2_cuts(self) -> CutSet:
+        logging.info("mini_librispeech: About to get dev-clean-2 cuts")
+        return load_manifest_lazy(
+            self.args.manifest_dir / "librispeech_cuts_dev-clean-2.jsonl.gz"
         )
 
     @lru_cache()

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# fix segmentation fault reported in https://github.com/k2-fsa/icefall/issues/674
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
 set -eou pipefail
 
 nj=15
@@ -290,7 +293,7 @@ fi
 
 if [ $stage -le 12 ] && [ $stop_stage -ge 12 ]; then
   log "Stage 12: Prepare G"
-  # We assume you have install kaldilm, if not, please install
+  # We assume you have installed kaldilm, if not, please install
   # it using: pip install kaldilm
 
   mkdir -p data/lm

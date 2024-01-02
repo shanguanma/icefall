@@ -23,6 +23,7 @@
 Usage:
 ./conformer_ctc2/export.py \
   --exp-dir ./conformer_ctc2/exp \
+  --tokens ./data/lang_bpe_500/tokens.txt \
   --epoch 20 \
   --avg 10
 
@@ -46,7 +47,9 @@ import argparse
 import logging
 from pathlib import Path
 
+import k2
 import torch
+from conformer import Conformer
 from decode import get_params
 
 from icefall.checkpoint import (
@@ -55,10 +58,7 @@ from icefall.checkpoint import (
     find_checkpoints,
     load_checkpoint,
 )
-from conformer import Conformer
-
-from icefall.utils import str2bool
-from icefall.lexicon import Lexicon
+from icefall.utils import num_tokens, str2bool
 
 
 def get_parser():
@@ -124,10 +124,10 @@ def get_parser():
     )
 
     parser.add_argument(
-        "--lang-dir",
+        "--tokens",
         type=str,
-        default="data/lang_bpe_500",
-        help="The lang dir",
+        required=True,
+        help="Path to the tokens.txt.",
     )
 
     parser.add_argument(
@@ -144,14 +144,14 @@ def get_parser():
 def main():
     args = get_parser().parse_args()
     args.exp_dir = Path(args.exp_dir)
-    args.lang_dir = Path(args.lang_dir)
 
     params = get_params()
     params.update(vars(args))
 
-    lexicon = Lexicon(params.lang_dir)
-    max_token_id = max(lexicon.tokens)
-    num_classes = max_token_id + 1  # +1 for the blank
+    # Load tokens.txt here
+    token_table = k2.SymbolTable.from_file(params.tokens)
+
+    num_classes = num_tokens(token_table) + 1  # +1 for the blank
 
     device = torch.device("cpu")
     if torch.cuda.is_available():
@@ -177,9 +177,9 @@ def main():
 
     if not params.use_averaged_model:
         if params.iter > 0:
-            filenames = find_checkpoints(
-                params.exp_dir, iteration=-params.iter
-            )[: params.avg]
+            filenames = find_checkpoints(params.exp_dir, iteration=-params.iter)[
+                : params.avg
+            ]
             if len(filenames) == 0:
                 raise ValueError(
                     f"No checkpoints found for"
@@ -206,9 +206,9 @@ def main():
             model.load_state_dict(average_checkpoints(filenames, device=device))
     else:
         if params.iter > 0:
-            filenames = find_checkpoints(
-                params.exp_dir, iteration=-params.iter
-            )[: params.avg + 1]
+            filenames = find_checkpoints(params.exp_dir, iteration=-params.iter)[
+                : params.avg + 1
+            ]
             if len(filenames) == 0:
                 raise ValueError(
                     f"No checkpoints found for"
@@ -273,9 +273,7 @@ def main():
 
 
 if __name__ == "__main__":
-    formatter = (
-        "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
-    )
+    formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
 
     logging.basicConfig(format=formatter, level=logging.INFO)
     main()

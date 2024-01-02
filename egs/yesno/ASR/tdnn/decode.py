@@ -65,7 +65,6 @@ def get_params() -> AttributeDict:
         {
             "exp_dir": Path("tdnn/exp/"),
             "lang_dir": Path("data/lang_phone"),
-            "lm_dir": Path("data/lm"),
             "feature_dim": 23,
             "search_beam": 20,
             "output_beam": 8,
@@ -147,7 +146,7 @@ def decode_dataset(
     model: nn.Module,
     HLG: k2.Fsa,
     word_table: k2.SymbolTable,
-) -> List[Tuple[List[int], List[int]]]:
+) -> List[Tuple[str, List[str], List[str]]]:
     """Decode dataset.
 
     Args:
@@ -201,16 +200,14 @@ def decode_dataset(
         if batch_idx % 100 == 0:
             batch_str = f"{batch_idx}/{num_batches}"
 
-            logging.info(
-                f"batch {batch_str}, cuts processed until now is {num_cuts}"
-            )
+            logging.info(f"batch {batch_str}, cuts processed until now is {num_cuts}")
     return results
 
 
 def save_results(
     exp_dir: Path,
     test_set_name: str,
-    results: List[Tuple[List[int], List[int]]],
+    results: List[Tuple[str, List[str], List[str]]],
 ) -> None:
     """Save results to `exp_dir`.
     Args:
@@ -274,9 +271,7 @@ def main():
 
     logging.info(f"device: {device}")
 
-    HLG = k2.Fsa.from_dict(
-        torch.load(f"{params.lang_dir}/HLG.pt", map_location="cpu")
-    )
+    HLG = k2.Fsa.from_dict(torch.load(f"{params.lang_dir}/HLG.pt", map_location="cpu"))
     HLG = HLG.to(device)
     assert HLG.requires_grad is False
 
@@ -297,9 +292,7 @@ def main():
 
     if params.export:
         logging.info(f"Export averaged model to {params.exp_dir}/pretrained.pt")
-        torch.save(
-            {"model": model.state_dict()}, f"{params.exp_dir}/pretrained.pt"
-        )
+        torch.save({"model": model.state_dict()}, f"{params.exp_dir}/pretrained.pt")
         return
 
     model.to(device)
@@ -317,9 +310,7 @@ def main():
         word_table=lexicon.word_table,
     )
 
-    save_results(
-        exp_dir=params.exp_dir, test_set_name="test_set", results=results
-    )
+    save_results(exp_dir=params.exp_dir, test_set_name="test_set", results=results)
 
     logging.info("Done!")
 

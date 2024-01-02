@@ -20,7 +20,7 @@ import argparse
 import inspect
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from lhotse import CutSet, Fbank, FbankConfig
 from lhotse.dataset import (
@@ -29,10 +29,7 @@ from lhotse.dataset import (
     K2SpeechRecognitionDataset,
     SpecAugment,
 )
-from lhotse.dataset.input_strategies import (
-    OnTheFlyFeatures,
-    PrecomputedFeatures,
-)
+from lhotse.dataset.input_strategies import OnTheFlyFeatures, PrecomputedFeatures
 from torch.utils.data import DataLoader
 
 from icefall.utils import str2bool
@@ -147,6 +144,7 @@ class AsrDataModule:
         cuts_train: CutSet,
         on_the_fly_feats: bool,
         cuts_musan: Optional[CutSet] = None,
+        sampler_state_dict: Optional[Dict[str, Any]] = None,
     ) -> DataLoader:
         """
         Args:
@@ -162,9 +160,7 @@ class AsrDataModule:
         if cuts_musan is not None:
             logging.info("Enable MUSAN")
             transforms.append(
-                CutMix(
-                    cuts=cuts_musan, prob=0.5, snr=(10, 20), preserve_id=True
-                )
+                CutMix(cuts=cuts_musan, p=0.5, snr=(10, 20), preserve_id=True)
             )
         else:
             logging.info("Disable MUSAN")
@@ -173,9 +169,7 @@ class AsrDataModule:
 
         if self.args.enable_spec_aug:
             logging.info("Enable SpecAugment")
-            logging.info(
-                f"Time warp factor: {self.args.spec_aug_time_warp_factor}"
-            )
+            logging.info(f"Time warp factor: {self.args.spec_aug_time_warp_factor}")
             # Set the value of num_frame_masks according to Lhotse's version.
             # In different Lhotse's versions, the default of num_frame_masks is
             # different.
@@ -235,6 +229,10 @@ class AsrDataModule:
             drop_last=True,
         )
 
+        if sampler_state_dict is not None:
+            logging.info("Loading sampler state dict")
+            train_sampler.load_state_dict(sampler_state_dict)
+
         logging.info("About to create train dataloader")
         train_dl = DataLoader(
             train,
@@ -252,9 +250,7 @@ class AsrDataModule:
         if self.args.on_the_fly_feats:
             validate = K2SpeechRecognitionDataset(
                 cut_transforms=transforms,
-                input_strategy=OnTheFlyFeatures(
-                    Fbank(FbankConfig(num_mel_bins=80))
-                ),
+                input_strategy=OnTheFlyFeatures(Fbank(FbankConfig(num_mel_bins=80))),
                 return_cuts=self.args.return_cuts,
             )
         else:

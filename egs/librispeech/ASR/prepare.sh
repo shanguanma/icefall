@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# fix segmentation fault reported in https://github.com/k2-fsa/icefall/issues/674
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
 set -eou pipefail
 
 nj=15
@@ -41,9 +44,9 @@ dl_dir=$PWD/download
 # It will generate data/lang_bpe_xxx,
 # data/lang_bpe_yyy if the array contains xxx, yyy
 vocab_sizes=(
-  5000
-  2000
-  1000
+  # 5000
+  # 2000
+  # 1000
   500
 )
 
@@ -104,7 +107,7 @@ fi
 if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
   log "Stage 2: Prepare musan manifest"
   # We assume that you have downloaded the musan corpus
-  # to data/musan
+  # to $dl_dir/musan
   mkdir -p data/manifests
   if [ ! -e data/manifests/.musan.done ]; then
     lhotse prepare musan $dl_dir/musan data/manifests
@@ -118,6 +121,13 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
   if [ ! -e data/fbank/.librispeech.done ]; then
     ./local/compute_fbank_librispeech.py
     touch data/fbank/.librispeech.done
+  fi
+
+  if [ ! -f data/fbank/librispeech_cuts_train-all-shuf.jsonl.gz ]; then
+    cat <(gunzip -c data/fbank/librispeech_cuts_train-clean-100.jsonl.gz) \
+      <(gunzip -c data/fbank/librispeech_cuts_train-clean-360.jsonl.gz) \
+      <(gunzip -c data/fbank/librispeech_cuts_train-other-500.jsonl.gz) | \
+      shuf | gzip -c > data/fbank/librispeech_cuts_train-all-shuf.jsonl.gz
   fi
 
   if [ ! -e data/fbank/.librispeech-validated.done ]; then
@@ -160,6 +170,22 @@ if [ $stage -le 5 ] && [ $stop_stage -ge 5 ]; then
   if [ ! -f $lang_dir/L_disambig.pt ]; then
     ./local/prepare_lang.py --lang-dir $lang_dir
   fi
+
+  if [ ! -f $lang_dir/L.fst ]; then
+    log "Converting L.pt to L.fst"
+    ./shared/convert-k2-to-openfst.py \
+      --olabels aux_labels \
+      $lang_dir/L.pt \
+      $lang_dir/L.fst
+  fi
+
+  if [ ! -f $lang_dir/L_disambig.fst ]; then
+    log "Converting L_disambig.pt to L_disambig.fst"
+    ./shared/convert-k2-to-openfst.py \
+      --olabels aux_labels \
+      $lang_dir/L_disambig.pt \
+      $lang_dir/L_disambig.fst
+  fi
 fi
 
 
@@ -200,11 +226,27 @@ if [ $stage -le 6 ] && [ $stop_stage -ge 6 ]; then
         --lexicon $lang_dir/lexicon.txt \
         --bpe-model $lang_dir/bpe.model
     fi
+
+    if [ ! -f $lang_dir/L.fst ]; then
+      log "Converting L.pt to L.fst"
+      ./shared/convert-k2-to-openfst.py \
+        --olabels aux_labels \
+        $lang_dir/L.pt \
+        $lang_dir/L.fst
+    fi
+
+    if [ ! -f $lang_dir/L_disambig.fst ]; then
+      log "Converting L_disambig.pt to L_disambig.fst"
+      ./shared/convert-k2-to-openfst.py \
+        --olabels aux_labels \
+        $lang_dir/L_disambig.pt \
+        $lang_dir/L_disambig.fst
+    fi
   done
 fi
 
 if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
-  log "Stage 7: Prepare bigram P"
+  log "Stage 7: Prepare bigram token-level P for MMI training"
 
   for vocab_size in ${vocab_sizes[@]}; do
     lang_dir=data/lang_bpe_${vocab_size}
@@ -236,7 +278,7 @@ fi
 
 if [ $stage -le 8 ] && [ $stop_stage -ge 8 ]; then
   log "Stage 8: Prepare G"
-  # We assume you have install kaldilm, if not, please install
+  # We assume you have installed kaldilm, if not, please install
   # it using: pip install kaldilm
 
   mkdir -p data/lm
@@ -257,15 +299,35 @@ if [ $stage -le 8 ] && [ $stop_stage -ge 8 ]; then
       --max-order=4 \
       $dl_dir/lm/4-gram.arpa > data/lm/G_4_gram.fst.txt
   fi
+
+  for vocab_size in ${vocab_sizes[@]}; do
+    lang_dir=data/lang_bpe_${vocab_size}
+
+    if [ ! -f $lang_dir/HL.fst ]; then
+      ./local/prepare_lang_fst.py  \
+        --lang-dir $lang_dir \
+        --ngram-G ./data/lm/G_3_gram.fst.txt
+    fi
+  done
 fi
 
 if [ $stage -le 9 ] && [ $stop_stage -ge 9 ]; then
   log "Stage 9: Compile HLG"
   ./local/compile_hlg.py --lang-dir data/lang_phone
 
+  # Note If ./local/compile_hlg.py throws OOM,
+  # please switch to the following command
+  #
+  # ./local/compile_hlg_using_openfst.py --lang-dir data/lang_phone
+
   for vocab_size in ${vocab_sizes[@]}; do
     lang_dir=data/lang_bpe_${vocab_size}
     ./local/compile_hlg.py --lang-dir $lang_dir
+
+    # Note If ./local/compile_hlg.py throws OOM,
+    # please switch to the following command
+    #
+    # ./local/compile_hlg_using_openfst.py --lang-dir $lang_dir
   done
 fi
 

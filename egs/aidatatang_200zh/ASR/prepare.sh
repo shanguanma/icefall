@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 
+# fix segmentation fault reported in https://github.com/k2-fsa/icefall/issues/674
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
 set -eou pipefail
 
 stage=-1
 stop_stage=100
+perturb_speed=true
+
 
 # We assume dl_dir (download dir) contains the following
 # directories and files. If not, they will be downloaded
@@ -74,7 +79,7 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
   log "Stage 4: Compute fbank for aidatatang_200zh"
   if [ ! -f data/fbank/.aidatatang_200zh.done ]; then
     mkdir -p data/fbank
-    ./local/compute_fbank_aidatatang_200zh.py
+    ./local/compute_fbank_aidatatang_200zh.py --perturb-speed ${perturb_speed}
     touch data/fbank/.aidatatang_200zh.done
   fi
 fi
@@ -106,11 +111,10 @@ if [ $stage -le 5 ] && [ $stop_stage -ge 5 ]; then
   if [ ! -f $lang_char_dir/words.txt ]; then
     ./local/prepare_words.py \
       --input-file $lang_char_dir/words_no_ids.txt \
-      --output-file $lang_char_dir/words.txt 
+      --output-file $lang_char_dir/words.txt
   fi
 
   if [ ! -f $lang_char_dir/L_disambig.pt ]; then
     ./local/prepare_char.py
   fi
 fi
-

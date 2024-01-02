@@ -70,6 +70,10 @@ class Decoder(nn.Module):
                 groups=embedding_dim,
                 bias=False,
             )
+        else:
+            # To avoid `RuntimeError: Module 'Decoder' has no attribute 'conv'`
+            # when inference with torch.jit.script and context_size == 1
+            self.conv = nn.Identity()
 
     def forward(self, y: torch.Tensor, need_pad: bool = True) -> torch.Tensor:
         """
@@ -86,9 +90,7 @@ class Decoder(nn.Module):
         if self.context_size > 1:
             embedding_out = embedding_out.permute(0, 2, 1)
             if need_pad is True:
-                embedding_out = F.pad(
-                    embedding_out, pad=(self.context_size - 1, 0)
-                )
+                embedding_out = F.pad(embedding_out, pad=(self.context_size - 1, 0))
             else:
                 # During inference time, there is no need to do extra padding
                 # as we only need one output

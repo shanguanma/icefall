@@ -87,9 +87,7 @@ def lexicon_to_fst_no_sil(
         cur_state = loop_state
 
         word = word2id[word]
-        pieces = [
-            token2id[i] if i in token2id else token2id["<unk>"] for i in pieces
-        ]
+        pieces = [token2id[i] if i in token2id else token2id["<unk>"] for i in pieces]
 
         for i in range(len(pieces) - 1):
             w = word if i == 0 else eps
@@ -213,8 +211,9 @@ def main():
     lang_dir = Path("data/lang_char")
     text_file = lang_dir / "text_with_bpe"
     bpe_model = lang_dir / "bpe.model"
+    words_file = lang_dir / "words.txt"
 
-    word_sym_table = k2.SymbolTable.from_file(lang_dir / "words.txt")
+    word_sym_table = k2.SymbolTable.from_file(words_file)
 
     words = word_sym_table.symbols
 

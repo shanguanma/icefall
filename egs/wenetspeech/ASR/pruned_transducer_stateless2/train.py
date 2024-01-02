@@ -81,7 +81,6 @@ For training with the S subset:
 
 import argparse
 import logging
-import os
 import warnings
 from pathlib import Path
 from shutil import copyfile
@@ -116,11 +115,7 @@ from icefall.env import get_env_info
 from icefall.lexicon import Lexicon
 from icefall.utils import AttributeDict, MetricsTracker, setup_logger, str2bool
 
-LRSchedulerType = Union[
-    torch.optim.lr_scheduler._LRScheduler, optim.LRScheduler
-]
-
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+LRSchedulerType = Union[torch.optim.lr_scheduler._LRScheduler, optim.LRScheduler]
 
 
 def get_parser():
@@ -162,7 +157,7 @@ def get_parser():
         default=0,
         help="""Resume training from from this epoch.
         If it is positive, it will load checkpoint from
-        transducer_stateless2/exp/epoch-{start_epoch-1}.pt
+        pruned_transducer_stateless2/exp/epoch-{start_epoch-1}.pt
         """,
     )
 
@@ -222,8 +217,7 @@ def get_parser():
         "--context-size",
         type=int,
         default=2,
-        help="The context size in the decoder. 1 means bigram; "
-        "2 means tri-gram",
+        help="The context size in the decoder. 1 means bigram; 2 means tri-gram",
     )
 
     parser.add_argument(
@@ -246,8 +240,7 @@ def get_parser():
         "--am-scale",
         type=float,
         default=0.0,
-        help="The scale to smooth the loss with am (output of encoder network)"
-        "part.",
+        help="The scale to smooth the loss with am (output of encoder network) part.",
     )
 
     parser.add_argument(
@@ -361,8 +354,8 @@ def get_params() -> AttributeDict:
             "best_valid_loss": float("inf"),
             "best_train_epoch": -1,
             "best_valid_epoch": -1,
-            "batch_idx_train": 10,
-            "log_interval": 1,
+            "batch_idx_train": 0,
+            "log_interval": 50,
             "reset_interval": 200,
             # parameters for conformer
             "feature_dim": 80,
@@ -545,7 +538,7 @@ def compute_loss(
     warmup: float = 1.0,
 ) -> Tuple[Tensor, MetricsTracker]:
     """
-    Compute CTC loss given the model and its inputs.
+    Compute RNN-T loss given the model and its inputs.
     Args:
       params:
         Parameters for training. See :func:`get_params`.
@@ -573,7 +566,7 @@ def compute_loss(
     texts = batch["supervisions"]["text"]
 
     y = graph_compiler.texts_to_ids(texts)
-    if type(y) == list:
+    if isinstance(y, list):
         y = k2.RaggedTensor(y).to(device)
     else:
         y = y.to(device)
@@ -593,22 +586,15 @@ def compute_loss(
         # overwhelming the simple_loss and causing it to diverge,
         # in case it had not fully learned the alignment yet.
         pruned_loss_scale = (
-            0.0
-            if warmup < 1.0
-            else (0.1 if warmup > 1.0 and warmup < 2.0 else 1.0)
+            0.0 if warmup < 1.0 else (0.1 if warmup > 1.0 and warmup < 2.0 else 1.0)
         )
-        loss = (
-            params.simple_loss_scale * simple_loss
-            + pruned_loss_scale * pruned_loss
-        )
+        loss = params.simple_loss_scale * simple_loss + pruned_loss_scale * pruned_loss
     assert loss.requires_grad == is_training
 
     info = MetricsTracker()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        info["frames"] = (
-            (feature_lens // params.subsampling_factor).sum().item()
-        )
+        info["frames"] = (feature_lens // params.subsampling_factor).sum().item()
 
     # Note: We use reduction=sum while computing the loss.
     info["loss"] = loss.detach().cpu().item()
@@ -697,7 +683,6 @@ def train_one_epoch(
     tot_loss = MetricsTracker()
 
     for batch_idx, batch in enumerate(train_dl):
-
         params.batch_idx_train += 1
         batch_size = len(batch["supervisions"]["text"])
 
@@ -766,9 +751,7 @@ def train_one_epoch(
                 loss_info.write_summary(
                     tb_writer, "train/current_", params.batch_idx_train
                 )
-                tot_loss.write_summary(
-                    tb_writer, "train/tot_", params.batch_idx_train
-                )
+                tot_loss.write_summary(tb_writer, "train/tot_", params.batch_idx_train)
 
         if batch_idx > 0 and batch_idx % params.valid_interval == 0:
             logging.info("Computing validation loss")
@@ -868,7 +851,7 @@ def run(rank, world_size, args):
 
     if params.print_diagnostics:
         opts = diagnostics.TensorDiagnosticOptions(
-            2 ** 22
+            512
         )  # allow 4 megabytes per sub-module
         diagnostic = diagnostics.attach_diagnostics(model, opts)
 
@@ -878,15 +861,41 @@ def run(rank, world_size, args):
     valid_cuts = wenetspeech.valid_cuts()
 
     def remove_short_and_long_utt(c: Cut):
-        # Keep only utterances with duration between 1 second and 15.0 seconds
+        # Keep only utterances with duration between 1 second and 10 seconds
         #
-        # Caution: There is a reason to select 15.0 here. Please see
+        # Caution: There is a reason to select 10.0 here. Please see
         # ../local/display_manifest_statistics.py
         #
         # You should use ../local/display_manifest_statistics.py to get
         # an utterance duration distribution for your dataset to select
         # the threshold
-        return 1.0 <= c.duration <= 15.0
+        if c.duration < 1.0 or c.duration > 10.0:
+            logging.warning(
+                f"Exclude cut with ID {c.id} from training. Duration: {c.duration}"
+            )
+            return False
+
+        # In pruned RNN-T, we require that T >= S
+        # where T is the number of feature frames after subsampling
+        # and S is the number of tokens in the utterance
+
+        # In ./conformer.py, the conv module uses the following expression
+        # for subsampling
+        T = ((c.num_frames - 1) // 2 - 1) // 2
+        tokens = c.supervisions[0].text.replace(" ", "")
+
+        if T < len(tokens):
+            logging.warning(
+                f"Exclude cut with ID {c.id} from training. "
+                f"Number of frames (before subsampling): {c.num_frames}. "
+                f"Number of frames (after subsampling): {T}. "
+                f"Text: {c.supervisions[0].text}. "
+                f"Tokens: {tokens}. "
+                f"Number of tokens: {len(tokens)}"
+            )
+            return False
+
+        return True
 
     train_cuts = train_cuts.filter(remove_short_and_long_utt)
 

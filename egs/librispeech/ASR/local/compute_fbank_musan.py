@@ -28,7 +28,7 @@ import os
 from pathlib import Path
 
 import torch
-from lhotse import CutSet, Fbank, FbankConfig, LilcomChunkyWriter, combine
+from lhotse import CutSet, Fbank, FbankConfig, LilcomChunkyWriter, MonoCut, combine
 from lhotse.recipes.utils import read_manifests_if_cached
 
 from icefall.utils import get_executor
@@ -39,6 +39,10 @@ from icefall.utils import get_executor
 # even when we are not invoking the main (e.g. when spawning subprocesses).
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
+
+
+def is_cut_long(c: MonoCut) -> bool:
+    return c.duration > 5
 
 
 def compute_fbank_musan():
@@ -65,6 +69,8 @@ def compute_fbank_musan():
     assert len(manifests) == len(dataset_parts), (
         len(manifests),
         len(dataset_parts),
+        list(manifests.keys()),
+        dataset_parts,
     )
 
     musan_cuts_path = output_dir / "musan_cuts.jsonl.gz"
@@ -81,12 +87,10 @@ def compute_fbank_musan():
         # create chunks of Musan with duration 5 - 10 seconds
         musan_cuts = (
             CutSet.from_manifests(
-                recordings=combine(
-                    part["recordings"] for part in manifests.values()
-                )
+                recordings=combine(part["recordings"] for part in manifests.values())
             )
             .cut_into_windows(10.0)
-            .filter(lambda c: c.duration > 5)
+            .filter(is_cut_long)
             .compute_and_store_features(
                 extractor=extractor,
                 storage_path=f"{output_dir}/musan_feats",
@@ -99,9 +103,7 @@ def compute_fbank_musan():
 
 
 if __name__ == "__main__":
-    formatter = (
-        "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
-    )
+    formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
 
     logging.basicConfig(format=formatter, level=logging.INFO)
     compute_fbank_musan()

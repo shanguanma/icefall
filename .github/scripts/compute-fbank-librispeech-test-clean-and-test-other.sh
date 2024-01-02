@@ -4,6 +4,8 @@
 # The computed features are saved to ~/tmp/fbank-libri and are
 # cached for later runs
 
+set -e
+
 export PYTHONPATH=$PWD:$PYTHONPATH
 echo $PYTHONPATH
 
@@ -13,5 +15,5 @@ mkdir -p data
 cd data
 [ ! -e fbank ] && ln -s ~/tmp/fbank-libri fbank
 cd ..
-./local/compute_fbank_librispeech.py
+./local/compute_fbank_librispeech.py --dataset 'test-clean test-other'
 ls -lh data/fbank/
